@@ -13,15 +13,15 @@ class GreedyPlayer(BasePlayer):
     def _make_move_x(self, state: State, legal_moves: list[tuple[str, int | None]]) -> tuple[str, int | None]:
         """ Helper function for making moves as Mr. X. """
 
-        mrx_stations = self.graph.get_potential_x_pos(state)
         danger_nodes = set()
         for det, node in state.positions.items():
             if det == 'x':
                 continue
 
-            for neighbor in self.graph.get_reachable_neighbors(state, det):
-                if neighbor in mrx_stations:
-                    danger_nodes.add(neighbor)
+            for neighbor1 in self.graph.get_reachable_neighbors(state, det):
+                danger_nodes.add(neighbor1)
+                for neighbor2 in self.graph.get_reachable_neighbors(state, det, from_node = neighbor1):
+                    danger_nodes.add(neighbor2)
 
         safe_moves = []
         for ticket, node in legal_moves:

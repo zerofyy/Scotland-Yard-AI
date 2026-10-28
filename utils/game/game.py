@@ -83,9 +83,6 @@ class Game:
             dt = self.display.clock.tick(60) / 1000
             self.display.process_events()
 
-            if self.state.winner:
-                break
-
             self._new_round_visually(dt)
             self.display.draw()
 

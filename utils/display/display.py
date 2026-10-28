@@ -33,7 +33,8 @@ class Display:
         self.FONT_BODY = pygame.font.SysFont('arial', 18)
         self.FONT_BOLD = pygame.font.SysFont('arial', 15, bold = True)
         self.FONT_TITLE = pygame.font.SysFont('arial', 19, bold = True)
-        self.FONT_HUGE = pygame.font.SysFont('arial', 34, bold = True)
+        self.FONT_HUGE = pygame.font.SysFont('arial', 80, bold = True)
+        self.FONT_WINNER = pygame.font.SysFont('arial', 30, bold = True)
 
         self.wait_after_move = wait_after_move
         self.always_show_x = always_show_x
@@ -59,6 +60,9 @@ class Display:
         self.paused_for_input = False
         self.paused_time_left = 0
         self.user_controls = UserControlsHelper()
+
+        self.game_over_since = None
+        self.show_game_over = False
 
 
     @staticmethod
@@ -147,6 +151,7 @@ class Display:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.is_running = False
+                exit()
 
             elif event.type == pygame.VIDEORESIZE:
                 self.update_window_size(event.w, event.h)
@@ -297,11 +302,13 @@ class Display:
     def draw(self) -> None:
         """ Render the entire game visuals. """
 
+        self._update_game_over()
         self._draw_map()
         self._draw_highlighted_nodes()
         self._draw_tokens()
         self._draw_panel()
         self._draw_popup()
+        self._draw_game_over()
         pygame.display.flip()
 
 
@@ -355,6 +362,9 @@ class Display:
     def _draw_tokens(self) -> None:
         """ Helper function for rendering player positions. """
 
+        mouse_pos = pygame.mouse.get_pos()
+        mouse_in_viewport = self.viewport_rect.collidepoint(mouse_pos)
+
         for name, node_id in self._get_player_positions():
             sp = self.get_node_pos(node_id)
             if sp is None:
@@ -364,19 +374,27 @@ class Display:
             r = max(20, int(NODE_RADIUS * self.camera.current_zoom))
             color = COLOR_PLAYER.get(name, (200, 200, 200))
 
-            pygame.draw.circle(self.screen, COLOR_BLACK, (int(sx + 1), int(sy + 2)), r)
-            pygame.draw.circle(self.screen, color, (int(sx), int(sy)), r)
-            pygame.draw.circle(self.screen, (12, 12, 14), (int(sx), int(sy)), r, 2)
+            hovered = mouse_in_viewport and math.hypot(mouse_pos[0] - sx, mouse_pos[1] - sy) <= r
+
+            size = r * 2 + 8
+            c = size // 2
+            token = pygame.Surface((size, size), pygame.SRCALPHA)
+
+            pygame.draw.circle(token, COLOR_BLACK, (c + 1, c + 2), r)
+            pygame.draw.circle(token, color, (c, c), r)
+            pygame.draw.circle(token, (12, 12, 14), (c, c), r, 2)
 
             if name == 'x':
                 d = r * 0.55
-                pygame.draw.line(self.screen, COLOR_WHITE, (sx - d, sy - d), (sx + d, sy + d), 3)
-                pygame.draw.line(self.screen, COLOR_WHITE, (sx - d, sy + d), (sx + d, sy - d), 3)
-
+                pygame.draw.line(token, COLOR_WHITE, (c - d, c - d), (c + d, c + d), 3)
+                pygame.draw.line(token, COLOR_WHITE, (c - d, c + d), (c + d, c - d), 3)
             else:
-                letter = name.upper()
-                surf = self.FONT_BOLD.render(letter, True, (12, 12, 14))
-                self.screen.blit(surf, surf.get_rect(center = (int(sx), int(sy))))
+                surf = self.FONT_BOLD.render(name.upper(), True, (12, 12, 14))
+                token.blit(surf, surf.get_rect(center=(c, c)))
+
+            if hovered:
+                token.set_alpha(ALPHA_TOKEN_HOVER)
+            self.screen.blit(token, (int(sx) - c, int(sy) - c))
 
 
     def _get_player_positions(self) -> list[tuple[str, int]]:
@@ -405,10 +423,6 @@ class Display:
         title = self.FONT_TITLE.render('Scotland Yard', True, COLOR_TEXT_HEADER)
         self.screen.blit(title, (x, y))
 
-        if self.state.winner:
-            surf = self.FONT_BODY.render(f'Winner: {self.state.winner}', True, COLOR_TEXT_HEADER)
-            self.screen.blit(surf, (x, y))
-
         y += 22
         y = self._draw_horizontal_line(x, y, px0)
 
@@ -425,7 +439,12 @@ class Display:
         y = self._draw_horizontal_line(x, y, px0)
 
         y = self._draw_section_header(x, y, 'Mr. X\'s Travel Logs')
-        self._draw_x_log(x, y)
+        y = self._draw_x_log(x, y)
+
+        if self.wait_after_move == 'input':
+            color = COLOR_TEXT if self.paused_for_input else COLOR_TEXT_MUTED
+            surf = self.FONT_BODY.render('Press SPACE to see the next move', True, color)
+            self.screen.blit(surf, (x, y + 10))
 
 
     def _draw_horizontal_line(self, x: float, y: float, panel_x0: float) -> float:
@@ -534,7 +553,7 @@ class Display:
             and self.state.can_use_double and self.state.tickets['x']['double'] != 0
 
 
-    def _draw_x_log(self, x: float, y: float) -> None:
+    def _draw_x_log(self, x: float, y: float) -> float:
         """ Helper function for rendering Mr. X's travel logs on the side panel. """
 
         cols, rows = 3, 8
@@ -561,6 +580,8 @@ class Display:
                 cell_x = col_x + num_w + gap_num
                 rect = pygame.Rect(cell_x, cy, cell, cell)
 
+                is_reveal = num in self.state.X_REVEAL_STEPS
+
                 if idx < len(self.state.travel_logs):
                     ticket = self.state.travel_logs[idx]
                     if isinstance(ticket, int):
@@ -576,8 +597,17 @@ class Display:
                     self.screen.blit(surf, surf.get_rect(center = rect.center))
 
                 else:
-                    pygame.draw.rect(self.screen, COLOR_PANEL_SECTION, rect, border_radius = 3)
-                    pygame.draw.rect(self.screen, COLOR_PANEL_BORDER, rect, 1, border_radius = 3)
+                    if is_reveal:
+                        fill = COLOR_PANEL_SECTION_BRIGHT
+                        border = COLOR_PANEL_BORDER_BRIGHT
+                    else:
+                        fill = COLOR_PANEL_SECTION
+                        border = COLOR_PANEL_BORDER
+
+                    pygame.draw.rect(self.screen, fill, rect, border_radius = 3)
+                    pygame.draw.rect(self.screen, border, rect, 1, border_radius = 3)
+
+        return grid_y + rows * (cell + row_gap)
 
 
     def _popup_option_rects(self) -> list[pygame.Rect]:
@@ -674,6 +704,56 @@ class Display:
         self.user_controls.popup_hover_idx = -1
         self.user_controls.popup_box = None
         self.user_controls.popup_ticket_boxes = None
+
+
+    def _update_game_over(self) -> None:
+        """ Helper function for deciding when the game over overlay should appear. """
+
+        if self.show_game_over or not self.state.winner:
+            return
+
+        if self.game_over_since is None:
+            self.game_over_since = pygame.time.get_ticks()
+            if self.wait_after_move == 'input':
+                self.paused_for_input = True
+
+        if self.wait_after_move is None:
+            self.show_game_over = True
+
+        elif isinstance(self.wait_after_move, int):
+            if pygame.time.get_ticks() - self.game_over_since >= self.wait_after_move:
+                self.show_game_over = True
+
+        elif self.wait_after_move == 'input':
+            if not self.paused_for_input:
+                self.show_game_over = True
+
+        if self.show_game_over:
+            self.hide_popup()
+            self.user_controls.reachable_nodes = None
+
+
+    def _draw_game_over(self) -> None:
+        """ Helper function for rendering the game over overlay on top of the map. """
+
+        if not self.show_game_over:
+            return
+
+        overlay = pygame.Surface((self.viewport_w, self.viewport_h), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 170))
+        self.screen.blit(overlay, (0, 0))
+
+        winner = 'Mr. X' if str(self.state.winner).lower() in ('x', 'mr. x', 'mr_x') else 'Detectives'
+        label = 'Winner' if winner == 'Mr. X' else 'Winners'
+
+        title = self.FONT_HUGE.render('GAME OVER', True, COLOR_WHITE)
+        subtitle = self.FONT_WINNER.render(f'{label}: {winner}', True, COLOR_WHITE)
+
+        cx, cy = self.viewport_w // 2, self.viewport_h // 2
+        self.screen.blit(title, title.get_rect(center = (cx, cy - 20)))
+        self.screen.blit(subtitle, subtitle.get_rect(center = (cx, cy + 45)))
+
+
 
 
 __all__ = ['Display']
