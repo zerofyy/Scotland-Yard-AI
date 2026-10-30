@@ -50,7 +50,7 @@ class GreedyPlayer(BasePlayer):
                     score += 1
 
             if score >= best_score:
-                best_ticket, best_node = ticket, node
+                best_ticket, best_node, best_score = ticket, node, score
 
         return best_ticket, best_node
 

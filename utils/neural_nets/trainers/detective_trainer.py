@@ -186,7 +186,7 @@ class DetectiveTrainer:
                 acted = torch.tensor(move_logs['acted'], dtype = torch.float32, device = past_values.device)
                 num_acted = acted.sum().clamp(min = 1)
 
-                if winner:
+                if winner or update_freq == 'per_show':
                     final_reward = 1.0 if winner == 'Detectives' else -1.0
                     winner_info = 'D' if winner == 'Detectives' else 'X'
                     advantages, targets = cls._compute_gae(past_values.detach(), final_reward, 0.0, gamma, lam = 0.95)
